@@ -456,7 +456,10 @@ namespace LgWebOs
             lock (_mainLock)
             {
                 if (IsPoweredOn)
+                {
+                    _logger.PrintLine("Already powered on");
                     return;
+                }
 
                 var wolPacket = new byte[1024];
                 var wolPacketIndex = 0;
@@ -488,7 +491,10 @@ namespace LgWebOs
             lock (_mainLock)
             {
                 if (!IsPoweredOn)
+                {
+                    _logger.PrintLine("Already powered off");
                     return;
+                }
 
                 _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"powerOff\",\"uri\":\"ssap://system/turnOff\"}");
                 ResetHeartbeat(5000);

@@ -128,9 +128,31 @@ namespace LgWebOs
                 _port = port;
                 _macAddress = Regex.Replace(macAddress, "[-|:]", "");
 
-                var currentDirectory = Directory.GetApplicationDirectory().Contains("\\") ? Directory.GetApplicationDirectory().Split('\\') : Directory.GetApplicationDirectory().Split('/');
+                
+                var currentDirectory = Directory.GetApplicationRootDirectory();
 
-                _keyFilePath = string.Format(@"{0}User{0}{1}{0}lgWebOsDisplay_{2}", Directory.GetApplicationDirectory().Contains("\\") ? "\\" : "/", currentDirectory[2], _id);
+                _logger.LogNotice("Current Directory: {0}", currentDirectory);
+
+                switch (CrestronEnvironment.DevicePlatform)
+                {
+                    case eDevicePlatform.Appliance:
+                    {
+                        var currentAppDirectoryArr = Directory.GetApplicationDirectory().Contains("\\")
+                            ? Directory.GetApplicationDirectory().Split('\\')
+                            : Directory.GetApplicationDirectory().Split('/');
+
+                        _keyFilePath = string.Format(@"{0}User{0}{1}{0}lgWebOsDisplay_{2}",
+                            currentDirectory.Contains("\\") ? "\\" : "/", currentAppDirectoryArr[2], _id);
+                    }
+                        break;
+                    case eDevicePlatform.Server:
+                        _keyFilePath = string.Format(@"{0}/User/lgWebOsDisplay_{1}", currentDirectory, _id);
+                        break;
+                    default:
+                        return;
+                }
+
+                _logger.LogNotice("Key File Path: {0}", _keyFilePath);
 
                 if (File.Exists(_keyFilePath))
                 {

@@ -254,7 +254,7 @@ namespace LgWebOs
 
                         if (OnCurrentInputValue != null)
                         {
-                            var input = _externalInputs.Find(x => x.id == CurrentInput);
+                            var input = _externalInputs.Find(x => x.Id == CurrentInput);
                             if (input != null)
                             {
                                 OnCurrentInputValue(Convert.ToUInt16(_externalInputs.IndexOf(input)));
@@ -272,8 +272,8 @@ namespace LgWebOs
 
                         foreach (var input in _externalInputs)
                         {
-                            inputNames.Add(input.label);
-                            inputIcons.Add(input.icon.Replace("http:",
+                            inputNames.Add(input.Label);
+                            inputIcons.Add(input.Icon.Replace("http:",
                                 string.Format("http://{0}:{1}", _ipAddress, _port)));
                         }
 
@@ -311,8 +311,8 @@ namespace LgWebOs
 
                         foreach (var input in _apps)
                         {
-                            appNames.Add(input.title);
-                            appIcons.Add(input.icon.Replace("http:",
+                            appNames.Add(input.Title);
+                            appIcons.Add(input.Icon.Replace("http:",
                                 string.Format("http://{0}:{1}", _ipAddress, _port)));
                         }
 
@@ -589,7 +589,7 @@ namespace LgWebOs
                 if (_externalInputs.Count < input)
                     return;
 
-                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"changeInput_" + _externalInputs[input - 1].id + "\",\"uri\":\"ssap://tv/switchInput\", \"payload\":{\"inputId\": \"" + _externalInputs[input - 1].id + "\"}}");
+                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"changeInput_" + _externalInputs[input - 1].Id + "\",\"uri\":\"ssap://tv/switchInput\", \"payload\":{\"inputId\": \"" + _externalInputs[input - 1].Id + "\"}}");
             }
             else
             {
@@ -615,7 +615,7 @@ namespace LgWebOs
                 if (_apps.Count < index)
                     return;
 
-                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"launchApp\",\"uri\":\"ssap://com.webos.applicationManager/launch\", \"payload\": {\"id\": \"" + _apps[index - 1].id + "\"}}");
+                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"launchApp\",\"uri\":\"ssap://com.webos.applicationManager/launch\", \"payload\": {\"id\": \"" + _apps[index - 1].Id + "\"}}");
             }
             else
             {

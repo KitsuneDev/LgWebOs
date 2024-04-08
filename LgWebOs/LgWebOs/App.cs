@@ -1,14 +1,21 @@
-﻿namespace LgWebOs
+﻿using Newtonsoft.Json;
+
+namespace LgWebOs
 {
     public class App
     {
-        public string id { get; set; }
-        public string title { get; set; }
-        public string icon { get; set; }
+        [JsonProperty("id")]
+        public string Id { get; set; }
+
+        [JsonProperty("title")]
+        public string Title { get; set; }
+
+        [JsonProperty("icon")]
+        public string Icon { get; set; }
 
         public override string ToString()
         {
-            return id + ":" + title + ":" + icon;
+            return Id + ":" + Title + ":" + Icon;
         }
     }
 }

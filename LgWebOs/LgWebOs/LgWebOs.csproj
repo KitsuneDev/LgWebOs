@@ -90,6 +90,7 @@
     <Compile Include="ExternalInput.cs" />
     <Compile Include="InputControls.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Utils\KeyUtils.cs" />
     <None Include="Properties\ControlSystem.cfg" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CompactFramework.CSharp.targets" />

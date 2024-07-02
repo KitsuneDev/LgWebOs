@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using Crestron.SimplSharp;
 using Crestron.SimplSharp.CrestronIO;
 using Guss.Communications.Sockets;
+using Guss.ModuleFramework;
 using Guss.ModuleFramework.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -25,9 +26,11 @@ namespace LgWebOs
         private InputControls _inputControls;
         private List<ExternalInput> _externalInputs;
         private List<App> _apps;
+        private readonly CTimer _cmdQueueDequeuer;
         private readonly CTimer _getDisplayInfoTimer;
         private readonly CTimer _heartbeatTimer;
         private readonly CTimer _heartbeatFailedTimer;
+        private readonly CommandQueue _cmdQueue = new CommandQueue();
 
         private ushort _port;
         private string _id;
@@ -81,11 +84,20 @@ namespace LgWebOs
         {
             _logger = new Logger("LgWebOs");
 
+            _cmdQueueDequeuer = new CTimer(x =>
+            {
+                if (_cmdQueue.IsEmpty) return;
+
+                var cmd = _cmdQueue.Dequeue();
+
+                _wsClient.SendCommand(cmd.CommandString);
+            }, Timeout.Infinite);
+
             _getDisplayInfoTimer = new CTimer(DisplayGetInfo, Timeout.Infinite);
             _heartbeatFailedTimer = new CTimer(x => ResetConnection(), Timeout.Infinite);
             _heartbeatTimer = new CTimer(x =>
                 {
-                    _wsClient.SendCommand(KeyUtils.GetVerifyClientKey(_clientKey));
+                    _cmdQueue.Enqueue(new Command(CommandPriorities.High, KeyUtils.GetVerifyClientKey(_clientKey)));
                     _heartbeatFailedTimer.Reset(30000);
                 }, Timeout.Infinite);
             
@@ -152,6 +164,8 @@ namespace LgWebOs
                 {
                     OnPowerState(0);
                 }
+
+                _cmdQueueDequeuer.Reset(100);
 
                 _wsClient.Connect();
             }
@@ -224,8 +238,7 @@ namespace LgWebOs
                     {
                         _inputControls = new InputControls(_ipAddress, _port,
                             response["payload"]["socketPath"].ToObject<string>(), _logger);
-                        _wsClient.SendCommand(
-                            "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}");
+                        SendCommand(new Command(CommandPriorities.Low, "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}"));
                     }
                     else if (response["id"].ToObject<string>().Contains("changeInput_"))
                     {
@@ -328,24 +341,22 @@ namespace LgWebOs
                     {
                         if (response["payload"]["returnValue"].ToObject<bool>())
                         {
-                            _wsClient.SendCommand(
-                                "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}");
+                            SendCommand(new Command(CommandPriorities.Low,
+                                "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}"));
                         }
                     }
                     else if (response["id"].ToObject<string>() == "volumeUp")
                     {
                         if (response["payload"]["returnValue"].ToObject<bool>())
                         {
-                            _wsClient.SendCommand(
-                                "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}");
+                            SendCommand(new Command(CommandPriorities.Low, "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}"));
                         }
                     }
                     else if (response["id"].ToObject<string>() == "volumeDown")
                     {
                         if (response["payload"]["returnValue"].ToObject<bool>())
                         {
-                            _wsClient.SendCommand(
-                                "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}");
+                            SendCommand(new Command(CommandPriorities.Low, "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}"));
                         }
                     }
                     else if (response["id"].ToObject<string>() == "getVolume")
@@ -411,7 +422,10 @@ namespace LgWebOs
                     {
                         OnPowerState(1);
                     }
-                    _wsClient.SendCommand(KeyUtils.GetVerifyClientKey(_clientKey));
+
+                    _cmdQueueDequeuer.Reset(0, 500);
+
+                    SendCommand(new Command(CommandPriorities.High, KeyUtils.GetVerifyClientKey(_clientKey)));
                     _heartbeatFailedTimer.Reset(30000);
                 }
                 else
@@ -419,6 +433,10 @@ namespace LgWebOs
                     _heartbeatFailedTimer.Stop();
                     _heartbeatTimer.Stop();
                     _getDisplayInfoTimer.Stop();
+
+                    _cmdQueueDequeuer.Stop();
+                    _cmdQueue.Clear();
+
                     if (_inputControls != null)
                     {
                         _inputControls.Dispose();
@@ -452,6 +470,11 @@ namespace LgWebOs
                 _wsClient.Disconnect();
                 _wsClient.Connect();
             }
+        }
+
+        public void SendCommand(Command commandToSend)
+        {
+            _cmdQueue.Enqueue(commandToSend);
         }
 
         public void PowerOn()
@@ -499,7 +522,7 @@ namespace LgWebOs
                     return;
                 }
 
-                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"powerOff\",\"uri\":\"ssap://system/turnOff\"}");
+                SendCommand(new Command(CommandPriorities.Highest, "{\"type\":\"request\",\"id\":\"powerOff\",\"uri\":\"ssap://system/turnOff\"}"));
                 ResetHeartbeat(5000);
             }
         }
@@ -511,7 +534,7 @@ namespace LgWebOs
 
             var volume = ScaleDown(value);
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"setVolume\",\"uri\":\"ssap://audio/setVolume\",\"payload\":{\"volume\":" + volume + "}}");
+            SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"setVolume\",\"uri\":\"ssap://audio/setVolume\",\"payload\":{\"volume\":" + volume + "}}"));
         }
 
         public void IncrementVolume()
@@ -519,7 +542,7 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"volumeUp\",\"uri\":\"ssap://audio/volumeUp\"}");
+            SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"volumeUp\",\"uri\":\"ssap://audio/volumeUp\"}"));
         }
 
         public void DecrementVolume()
@@ -527,7 +550,7 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"volumeDown\",\"uri\":\"ssap://audio/volumeDown\"}");
+            SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"volumeDown\",\"uri\":\"ssap://audio/volumeDown\"}"));
         }
 
         public void SetMute(ushort value)
@@ -535,7 +558,7 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand(string.Format("{\"type\":\"request\",\"id\":\"volumeMuteOn\",\"uri\":\"ssap://audio/setMute\", \"payload\":{\"mute\": {0}}}", Convert.ToBoolean(value)));
+            SendCommand(new Command(CommandPriorities.Medium, string.Format("{\"type\":\"request\",\"id\":\"volumeMuteOn\",\"uri\":\"ssap://audio/setMute\", \"payload\":{\"mute\": {0}}}", Convert.ToBoolean(value))));
         }
 
         public void SendKey(string name)
@@ -551,12 +574,12 @@ namespace LgWebOs
                 }
                 else
                 {
-                    _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}");
+                    SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}"));
                 }
             }
             else
             {
-                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}");
+                SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}"));
             }
         }
 
@@ -570,7 +593,7 @@ namespace LgWebOs
                 if (_externalInputs.Count < input)
                     return;
 
-                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"changeInput_" + _externalInputs[input - 1].Id + "\",\"uri\":\"ssap://tv/switchInput\", \"payload\":{\"inputId\": \"" + _externalInputs[input - 1].Id + "\"}}");
+                SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"changeInput_" + _externalInputs[input - 1].Id + "\",\"uri\":\"ssap://tv/switchInput\", \"payload\":{\"inputId\": \"" + _externalInputs[input - 1].Id + "\"}}"));
             }
             else
             {
@@ -583,7 +606,7 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"getExternalInputs\",\"uri\":\"ssap://tv/getExternalInputList\"}");
+            SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"getExternalInputs\",\"uri\":\"ssap://tv/getExternalInputList\"}"));
         }
 
         public void LaunchApp(ushort index)
@@ -596,7 +619,7 @@ namespace LgWebOs
                 if (_apps.Count < index)
                     return;
 
-                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"launchApp\",\"uri\":\"ssap://com.webos.applicationManager/launch\", \"payload\": {\"id\": \"" + _apps[index - 1].Id + "\"}}");
+                SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"launchApp\",\"uri\":\"ssap://com.webos.applicationManager/launch\", \"payload\": {\"id\": \"" + _apps[index - 1].Id + "\"}}"));
             }
             else
             {
@@ -609,7 +632,7 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"getAllApps\",\"uri\":\"ssap://com.webos.applicationManager/listLaunchPoints\"}");
+            SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"getAllApps\",\"uri\":\"ssap://com.webos.applicationManager/listLaunchPoints\"}"));
         }
 
         public void SendNotification(string value)
@@ -619,7 +642,7 @@ namespace LgWebOs
 
             _notificationOkayToSendEvent.Wait();
             _notificationOkayToSendEvent.Reset();
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"sendNotification\",\"uri\":\"ssap://system.notifications/createToast\",\"payload\":{\"message\":\"" + value + "\"}}");
+            SendCommand(new Command(CommandPriorities.Low, "{\"type\":\"request\",\"id\":\"sendNotification\",\"uri\":\"ssap://system.notifications/createToast\",\"payload\":{\"message\":\"" + value + "\"}}"));
 // ReSharper disable ObjectCreationAsStatement
             new CTimer(x => _notificationOkayToSendEvent.Set(), 500);
 // ReSharper restore ObjectCreationAsStatement
@@ -636,7 +659,7 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}");
+            SendCommand(new Command(CommandPriorities.Highest, "{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}"));
             GetApps();
             GetInputs();
         }
@@ -672,6 +695,9 @@ namespace LgWebOs
                 _getDisplayInfoTimer.Dispose();
                 _heartbeatFailedTimer.Dispose();
                 _heartbeatTimer.Dispose();
+
+                _cmdQueueDequeuer.Stop();
+                _cmdQueue.Clear();
                 
                 if(_inputControls != null) _inputControls.Dispose();
                 _wsClient.Dispose();

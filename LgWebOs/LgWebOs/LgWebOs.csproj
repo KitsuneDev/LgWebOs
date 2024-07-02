@@ -50,7 +50,7 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\..\..\Guss.Communications\Guss.Communications\bin\Debug\Guss.Communications.dll</HintPath>
     </Reference>
-    <Reference Include="Guss.ModuleFramework, Version=1.0.0.13815, Culture=neutral, processorArchitecture=MSIL">
+    <Reference Include="Guss.ModuleFramework, Version=1.0.0.27841, Culture=neutral, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\..\..\Guss.ModuleFramework\Guss.ModuleFramework\bin\Debug\Guss.ModuleFramework.dll</HintPath>
     </Reference>

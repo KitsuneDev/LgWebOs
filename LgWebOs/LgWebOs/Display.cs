@@ -1,16 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Crestron.SimplSharp;
 using Crestron.SimplSharp.CrestronIO;
 using Guss.Communications.Sockets;
-using Guss.ModuleFramework.Logging;
+using Guss.Communications.ModuleFramework.Logging;
+using Guss.ModuleFramework;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using XSigUtilityLibrary;
+using LgWebOs.Utils;
 
 namespace LgWebOs
 {
@@ -20,13 +21,13 @@ namespace LgWebOs
         private readonly WebSocketClient _wsClient;
         private readonly ILogger _logger;
         private readonly object _mainLock = new object();
-        private readonly CEvent _notificationOkayToSendEvent = new CEvent(false, true);
         private InputControls _inputControls;
         private List<ExternalInput> _externalInputs;
         private List<App> _apps;
-        private readonly CTimer _getDisplayInfoTimer;
+        private readonly CTimer _cmdQueueDequeuer;
         private readonly CTimer _heartbeatTimer;
         private readonly CTimer _heartbeatFailedTimer;
+        private readonly CommandQueue<Command> _cmdQueue = new CommandQueue<Command>();
 
         private ushort _port;
         private string _id;
@@ -34,26 +35,6 @@ namespace LgWebOs
         private string _macAddress;
         private string _clientKey;
         private string _keyFilePath;
-
-        private static string GetClientKey
-        {
-            get
-            {
-                return
-                    "{\"type\":\"register\",\"id\":\"register_0\",\"payload\":{\"forcePairing\":false,\"pairingType\":\"PROMPT\",\"manifest\":{\"manifestVersion\":1,\"appVersion\":\"1.1\",\"signed\":{\"created\":\"20140509\",\"appId\":\"com.lge.test\",\"vendorId\":\"com.lge\",\"localizedAppNames\":{\"\":\"LG Remote App\"},\"localizedVendorNames\":{\"\":\"LG Electronics\"},\"permissions\":[\"TEST_SECURE\",\"CONTROL_INPUT_TEXT\",\"CONTROL_MOUSE_AND_KEYBOARD\",\"READ_INSTALLED_APPS\",\"LAUNCH_WEBAPP\",\"READ_LGE_SDX\",\"READ_NOTIFICATIONS\",\"SEARCH\",\"WRITE_SETTINGS\",\"WRITE_NOTIFICATION_ALERT\",\"CONTROL_POWER\",\"READ_CURRENT_CHANNEL\",\"READ_RUNNING_APPS\",\"READ_UPDATE_INFO\",\"UPDATE_FROM_REMOTE_APP\",\"READ_LGE_TV_INPUT_EVENTS\",\"READ_TV_CURRENT_TIME\",\"READ_INPUT_DEVICE_LIST\"],\"serial\":\"2f930e2d2cfe083771f68e4fe7bb07\"},\"permissions\":[\"LAUNCH\",\"READ_INSTALLED_APPS\",\"READ_LGE_SDX\",\"READ_LGE_TV_INPUT_EVENTS\",\"SEARCH\",\"CONTROL_MOUSE_AND_KEYBOARD\",\"LAUNCH_WEBAPP\",\"APP_TO_APP\",\"CLOSE\",\"TEST_OPEN\",\"TEST_PROTECTED\",\"CONTROL_AUDIO\",\"CONTROL_DISPLAY\",\"CONTROL_INPUT_JOYSTICK\",\"CONTROL_INPUT_MEDIA_RECORDING\",\"CONTROL_INPUT_MEDIA_PLAYBACK\",\"CONTROL_INPUT_TV\",\"CONTROL_POWER\",\"READ_APP_STATUS\",\"READ_CURRENT_CHANNEL\",\"READ_INPUT_DEVICE_LIST\",\"READ_NETWORK_STATE\",\"READ_RUNNING_APPS\",\"READ_TV_CHANNEL_LIST\",\"WRITE_NOTIFICATION_TOAST\",\"READ_POWER_STATE\",\"READ_COUNTRY_INFO\"],\"signatures\":[{\"signatureVersion\":1,\"signature\":\"eyJhbGdvcml0aG0iOiJSU0EtU0hBMjU2Iiwia2V5SWQiOiJ0ZXN0LXNpZ25pbmctY2VydCIsInNpZ25hdHVyZVZlcnNpb24iOjF9.hrVRgjCwXVvE2OOSpDZ58hR+59aFNwYDyjQgKk3auukd7pcegmE2CzPCa0bJ0ZsRAcKkCTJrWo5iDzNhMBWRyaMOv5zWSrthlf7G128qvIlpMT0YNY+n/FaOHE73uLrS/g7swl3/qH/BGFG2Hu4RlL48eb3lLKqTt2xKHdCs6Cd4RMfJPYnzgvI4BNrFUKsjkcu+WD4OO2A27Pq1n50cMchmcaXadJhGrOqH5YmHdOCj5NSHzJYrsW0HPlpuAx/ECMeIZYDh6RMqaFM2DXzdKX9NmmyqzJ3o/0lkk/N97gfVRLW5hA29yeAwaCViZNCP8iC9aO0q9fQojoa7NQnAtw==\"}]}}}";
-            }
-        }
-        private string VerifyClientKey
-        {
-            get
-            {
-                if (string.IsNullOrEmpty(_clientKey))
-                    return GetClientKey;
-
-                return "{\"type\":\"register\",\"id\":\"register_1\",\"payload\":{\"client-key\":\"" + _clientKey +
-                       "\"}}";
-            }
-        }
         #endregion
 
         #region Delegates
@@ -100,14 +81,28 @@ namespace LgWebOs
         {
             _logger = new Logger("LgWebOs");
 
-            _getDisplayInfoTimer = new CTimer(DisplayGetInfo, Timeout.Infinite);
-            _heartbeatFailedTimer = new CTimer(x => ResetConnection(), Timeout.Infinite);
+            _cmdQueueDequeuer = new CTimer(x =>
+            {
+                if (_cmdQueue.IsEmpty) return;
+
+                var cmd = _cmdQueue.Dequeue();
+
+                _wsClient.SendCommand(cmd.CommandString);
+            }, Timeout.Infinite);
+
+            _heartbeatFailedTimer = new CTimer(x =>
+            {
+                _logger.LogWarning("Hearbeat timed out, resetting connection.");
+                ResetConnection();
+            }, Timeout.Infinite);
             _heartbeatTimer = new CTimer(x =>
+            {
+                SendCommand(new Command(CommandPriorities.High, KeyUtils.GetVerifyClientKey(_clientKey)));
+                lock (_mainLock)
                 {
-                    _wsClient.SendCommand(VerifyClientKey);
-                    _heartbeatFailedTimer.Reset(30000);
-                }, Timeout.Infinite);
-            
+                    _heartbeatFailedTimer.Reset(2500);
+                }
+            }, Timeout.Infinite);
 
             _wsClient = new WebSocketClient(_logger);
 
@@ -128,9 +123,31 @@ namespace LgWebOs
                 _port = port;
                 _macAddress = Regex.Replace(macAddress, "[-|:]", "");
 
-                var currentDirectory = Directory.GetApplicationDirectory().Contains("\\") ? Directory.GetApplicationDirectory().Split('\\') : Directory.GetApplicationDirectory().Split('/');
+                
+                var currentDirectory = Directory.GetApplicationRootDirectory();
 
-                _keyFilePath = string.Format(@"{0}User{0}{1}{0}lgWebOsDisplay_{2}", Directory.GetApplicationDirectory().Contains("\\") ? "\\" : "/", currentDirectory[2], _id);
+                _logger.LogNotice("Current Directory: {0}", currentDirectory);
+
+                switch (CrestronEnvironment.DevicePlatform)
+                {
+                    case eDevicePlatform.Appliance:
+                    {
+                        var currentAppDirectoryArr = Directory.GetApplicationDirectory().Contains("\\")
+                            ? Directory.GetApplicationDirectory().Split('\\')
+                            : Directory.GetApplicationDirectory().Split('/');
+
+                        _keyFilePath = string.Format(@"{0}User{0}{1}{0}lgWebOsDisplay_{2}",
+                            currentDirectory.Contains("\\") ? "\\" : "/", currentAppDirectoryArr[2], _id);
+                    }
+                        break;
+                    case eDevicePlatform.Server:
+                        _keyFilePath = string.Format(@"{0}/User/lgWebOsDisplay_{1}", currentDirectory, _id);
+                        break;
+                    default:
+                        return;
+                }
+
+                _logger.LogNotice("Key File Path: {0}", _keyFilePath);
 
                 if (File.Exists(_keyFilePath))
                 {
@@ -142,6 +159,8 @@ namespace LgWebOs
 
                 _wsClient.IpAddress = "ws://" + ipAddress;
                 _wsClient.Port = port;
+
+                _cmdQueueDequeuer.Reset(0, 250);
 
                 IsInitialized = true;
 
@@ -168,7 +187,7 @@ namespace LgWebOs
         {
             try
             {
-                ResetHeartbeat(30000);
+                ResetHeartbeat(5000);
                 _logger.PrintLine("Response received -->{0}<--", args.Payload);
                 
                 var response = JObject.Parse(args.Payload);
@@ -184,9 +203,12 @@ namespace LgWebOs
                             {      
                                 _clientKey = response["payload"]["client-key"].ToObject<string>();
 
-                                using (var writer = new StreamWriter(File.Create(_keyFilePath)))
+                                lock (_mainLock)
                                 {
-                                    writer.Write(_clientKey);
+                                    using (var writer = new StreamWriter(File.Create(_keyFilePath)))
+                                    {
+                                        writer.Write(_clientKey);
+                                    }
                                 }
 
                                 ResetHeartbeat(0);
@@ -196,7 +218,7 @@ namespace LgWebOs
                             if (!IsRegistered)
                             {
                                 IsRegistered = true;
-                                _getDisplayInfoTimer.Reset(500);
+                                DisplayGetInfo();
                                 ResetHeartbeat(60000);
                             }
                             break;
@@ -209,184 +231,191 @@ namespace LgWebOs
                 {
                     if (response["type"].ToObject<string>() != "response") return;
                     if (response["id"] == null) return;
-                    if (response["id"].ToObject<string>() == "powerOff")
+                    switch (response["id"].ToObject<string>())
                     {
-                        if (response["payload"] == null) return;
-                        if (response["payload"]["returnValue"].ToObject<bool>())
-                        {
-                            ResetConnection();
-                        }
-                    }
-                    else if (response["id"].ToObject<string>() == "getInputSocket")
-                    {
-                        _inputControls = new InputControls(_ipAddress, _port,
-                            response["payload"]["socketPath"].ToObject<string>(), _logger);
-                        _wsClient.SendCommand(
-                            "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}");
-                    }
-                    else if (response["id"].ToObject<string>().Contains("changeInput_"))
-                    {
-                        if (!response["payload"]["returnValue"].ToObject<bool>()) return;
-                        CurrentInput = response["id"].ToObject<string>()
-                            .Replace("changeInput_", string.Empty);
-
-                        if (OnCurrentInputValue != null)
-                        {
-                            var input = _externalInputs.Find(x => x.id == CurrentInput);
-                            if (input != null)
+                        case "powerOff":
+                            if (response["payload"] == null) return;
+                            if (response["payload"]["returnValue"].ToObject<bool>())
                             {
-                                OnCurrentInputValue(Convert.ToUInt16(_externalInputs.IndexOf(input)));
+                                ResetConnection();
                             }
-                        }
-                    }
-                    else if (response["id"].ToObject<string>() == "getExternalInputs")
-                    {
-                        _externalInputs =
-                            JsonConvert.DeserializeObject<List<ExternalInput>>(
-                                response["payload"]["devices"].ToString());
-
-                        var inputNames = new List<string>();
-                        var inputIcons = new List<string>();
-
-                        foreach (var input in _externalInputs)
-                        {
-                            inputNames.Add(input.label);
-                            inputIcons.Add(input.icon.Replace("http:",
-                                string.Format("http://{0}:{1}", _ipAddress, _port)));
-                        }
-
-                        if (OnInputCount != null)
-                        {
-                            OnInputCount(Convert.ToUInt16(_externalInputs.Count));
-                        }
-
-                        if (OnExternalInputNames != null)
-                        {
-                            foreach (var encodedBytes in inputNames.Select(inputName => XSigHelpers.GetBytes(inputNames.IndexOf(inputName) + 1,
-                                inputName)))
+                            break;
+                        case "getInputSocket":
+                            _inputControls = new InputControls(_ipAddress, _port,
+                                response["payload"]["socketPath"].ToObject<string>(), _logger);
+                            SendCommand(new Command(CommandPriorities.Low,
+                                "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}"));
+                            break;
+                        default:
+                            if (response["id"].ToObject<string>().Contains("changeInput_"))
                             {
-                                OnExternalInputNames(Encoding.GetEncoding(28591)
-                                    .GetString(encodedBytes, 0, encodedBytes.Length));
+                                if (!response["payload"]["returnValue"].ToObject<bool>()) return;
+                                CurrentInput = response["id"].ToObject<string>()
+                                    .Replace("changeInput_", string.Empty);
+
+
+                                var input = _externalInputs.Find(x => x.Id == CurrentInput);
+                                if (input != null)
+                                {
+                                    if (OnCurrentInputValue != null)
+                                    {
+                                        OnCurrentInputValue(Convert.ToUInt16(_externalInputs.IndexOf(input)));
+                                    }
+                                }
                             }
-                        }
+                            else
+                                switch (response["id"].ToObject<string>())
+                                {
+                                    case "getExternalInputs":
+                                    {
+                                        _externalInputs =
+                                            JsonConvert.DeserializeObject<List<ExternalInput>>(
+                                                response["payload"]["devices"].ToString());
 
-                        if (OnExternalInputIcons == null) return;
-                        foreach (var encodedBytes in inputIcons.Select(inputIcon => XSigHelpers.GetBytes(inputIcons.IndexOf(inputIcon) + 1,
-                            inputIcon)))
-                        {
-                            OnExternalInputIcons(Encoding.GetEncoding(28591)
-                                .GetString(encodedBytes, 0, encodedBytes.Length));
-                        }
-                    }
-                    else if (response["id"].ToObject<string>() == "getAllApps")
-                    {
-                        _apps =
-                            JsonConvert.DeserializeObject<List<App>>(
-                                response["payload"]["launchPoints"].ToString());
+                                        var inputNames = new List<string>();
+                                        var inputIcons = new List<string>();
 
-                        var appNames = new List<string>();
-                        var appIcons = new List<string>();
+                                        foreach (var input in _externalInputs)
+                                        {
+                                            inputNames.Add(input.Label);
+                                            inputIcons.Add(input.Icon.Replace("http:",
+                                                string.Format("http://{0}:{1}", _ipAddress, _port)));
+                                        }
 
-                        foreach (var input in _apps)
-                        {
-                            appNames.Add(input.title);
-                            appIcons.Add(input.icon.Replace("http:",
-                                string.Format("http://{0}:{1}", _ipAddress, _port)));
-                        }
+                                        if (OnInputCount != null)
+                                        {
+                                            OnInputCount(Convert.ToUInt16(_externalInputs.Count));
+                                        }
 
-                        if (OnAppCount != null)
-                        {
-                            OnAppCount(Convert.ToUInt16(_apps.Count));
-                        }
 
-                        if (OnAppNames != null)
-                        {
-                            foreach (var appName in appNames)
-                            {
-                                var encodedBytes = XSigHelpers.GetBytes(appNames.IndexOf(appName) + 1,
-                                    appName);
-                                OnAppNames(Encoding.GetEncoding(28591)
-                                    .GetString(encodedBytes, 0, encodedBytes.Length));
-                            }
-                        }
+                                        foreach (var encodedBytes in inputNames.Select(
+                                            inputName =>
+                                                XSigHelpers.GetBytes(inputNames.IndexOf(inputName) + 1,
+                                                    inputName)).Where(encodedBytes => OnExternalInputNames != null))
+                                        {
+                                            OnExternalInputNames(Encoding.GetEncoding(28591)
+                                                .GetString(encodedBytes, 0, encodedBytes.Length));
+                                        }
 
-                        if (OnAppIcons != null)
-                        {
-                            foreach (var appIcon in appIcons)
-                            {
-                                var encodedBytes = XSigHelpers.GetBytes(appIcons.IndexOf(appIcon) + 1,
-                                    appIcon);
-                                OnAppIcons(Encoding.GetEncoding(28591)
-                                    .GetString(encodedBytes, 0, encodedBytes.Length));
-                            }
-                        }
-                    }
-                    else if (response["id"].ToObject<string>() == "setVolume")
-                    {
-                        if (response["payload"]["returnValue"].ToObject<bool>())
-                        {
-                            _wsClient.SendCommand(
-                                "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}");
-                        }
-                    }
-                    else if (response["id"].ToObject<string>() == "volumeUp")
-                    {
-                        if (response["payload"]["returnValue"].ToObject<bool>())
-                        {
-                            _wsClient.SendCommand(
-                                "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}");
-                        }
-                    }
-                    else if (response["id"].ToObject<string>() == "volumeDown")
-                    {
-                        if (response["payload"]["returnValue"].ToObject<bool>())
-                        {
-                            _wsClient.SendCommand(
-                                "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}");
-                        }
-                    }
-                    else if (response["id"].ToObject<string>() == "getVolume")
-                    {
-                        if (!response["payload"]["returnValue"].ToObject<bool>()) return;
-                        var value =
-                            ScaleUp(Convert.ToInt16(response["payload"]["volume"].ToObject<string>()));
+                                        if (OnExternalInputIcons == null) return;
+                                        foreach (
+                                            var encodedBytes in
+                                                inputIcons.Select(
+                                                    inputIcon => XSigHelpers.GetBytes(inputIcons.IndexOf(inputIcon) + 1,
+                                                        inputIcon)))
+                                        {
+                                            OnExternalInputIcons(Encoding.GetEncoding(28591)
+                                                .GetString(encodedBytes, 0, encodedBytes.Length));
+                                        }
+                                    }
+                                        break;
+                                    case "getAllApps":
+                                    {
+                                        _apps =
+                                            JsonConvert.DeserializeObject<List<App>>(
+                                                response["payload"]["launchPoints"].ToString());
 
-                        if (OnVolumeValue != null)
-                        {
-                            OnVolumeValue(Convert.ToUInt16(value));
-                        }
+                                        var appNames = new List<string>();
+                                        var appIcons = new List<string>();
 
-                        if (OnVolumeMuteState != null)
-                        {
-                            if (response["payload"]["muted"].ToObject<bool>())
-                            {
-                                OnVolumeMuteState(1);
-                            }
-                            else if (!response["payload"]["muted"].ToObject<bool>())
-                            {
-                                OnVolumeMuteState(0);
-                            }
-                        }
-                    }
-                    else if (response["id"].ToObject<string>() == "volumeMuteOn")
-                    {
-                        if (response["payload"]["returnValue"].ToObject<bool>())
-                        {
-                            if (OnVolumeMuteState != null)
-                            {
-                                OnVolumeMuteState(1);
-                            }
-                        }
-                    }
-                    else if (response["id"].ToObject<string>() == "volumeMuteOff")
-                    {
-                        if (response["payload"]["returnValue"].ToObject<bool>())
-                        {
-                            if (OnVolumeMuteState != null)
-                            {
-                                OnVolumeMuteState(0);
-                            }
-                        }
+                                        foreach (var input in _apps)
+                                        {
+                                            appNames.Add(input.Title);
+                                            appIcons.Add(input.Icon.Replace("http:",
+                                                string.Format("http://{0}:{1}", _ipAddress, _port)));
+                                        }
+
+                                        if (OnAppCount != null)
+                                        {
+                                            OnAppCount(Convert.ToUInt16(_apps.Count));
+                                        }
+
+
+                                        foreach (var encodedBytes in appNames.Select(
+                                            appName => XSigHelpers.GetBytes(appNames.IndexOf(appName) + 1,
+                                                appName)).Where(encodedBytes => OnAppNames != null))
+                                        {
+                                            OnAppNames(Encoding.GetEncoding(28591)
+                                                .GetString(encodedBytes, 0, encodedBytes.Length));
+                                        }
+
+
+                                        foreach (var encodedBytes in appIcons.Select(
+                                            appIcon => XSigHelpers.GetBytes(appIcons.IndexOf(appIcon) + 1,
+                                                appIcon)).Where(encodedBytes => OnAppIcons != null))
+                                        {
+                                            OnAppIcons(Encoding.GetEncoding(28591)
+                                                .GetString(encodedBytes, 0, encodedBytes.Length));
+                                        }
+                                    }
+                                        break;
+                                    case "setVolume":
+                                        if (response["payload"]["returnValue"].ToObject<bool>())
+                                        {
+                                            SendCommand(new Command(CommandPriorities.Low,
+                                                "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}"));
+                                        }
+                                        break;
+                                    case "volumeUp":
+                                        if (response["payload"]["returnValue"].ToObject<bool>())
+                                        {
+                                            SendCommand(new Command(CommandPriorities.Low,
+                                                "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}"));
+                                        }
+                                        break;
+                                    case "volumeDown":
+                                        if (response["payload"]["returnValue"].ToObject<bool>())
+                                        {
+                                            SendCommand(new Command(CommandPriorities.Low,
+                                                "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}"));
+                                        }
+                                        break;
+                                    case "getVolume":
+                                        if (!response["payload"]["returnValue"].ToObject<bool>()) return;
+                                        var value =
+                                            ScaleUp(Convert.ToInt16(response["payload"]["volume"].ToObject<string>()));
+
+                                        if (OnVolumeValue != null)
+                                        {
+                                            OnVolumeValue(Convert.ToUInt16(value));
+                                        }
+
+
+                                        if (response["payload"]["muted"].ToObject<bool>())
+                                        {
+                                            if (OnVolumeMuteState != null)
+                                            {
+                                                OnVolumeMuteState(1);
+                                            }
+                                        }
+                                        else if (!response["payload"]["muted"].ToObject<bool>())
+                                        {
+                                            if (OnVolumeMuteState != null)
+                                            {
+                                                OnVolumeMuteState(0);
+                                            }
+                                        }
+                                        break;
+                                    case "volumeMuteOn":
+                                        if (response["payload"]["returnValue"].ToObject<bool>())
+                                        {
+                                            if (OnVolumeMuteState != null)
+                                            {
+                                                OnVolumeMuteState(1);
+                                            }
+                                        }
+                                        break;
+                                    case "volumeMuteOff":
+                                        if (response["payload"]["returnValue"].ToObject<bool>())
+                                        {
+                                            if (OnVolumeMuteState != null)
+                                            {
+                                                OnVolumeMuteState(0);
+                                            }
+                                        }
+                                        break;
+                                }
+                            break;
                     }
                 }
             }
@@ -398,101 +427,132 @@ namespace LgWebOs
 
         private void _wsClient_ConnectedChange(object sender, Guss.Communications.CommunicationsBoolEventArgs args)
         {
+            _logger.PrintLine("Connection event received {0}", args.Payload);
+            _logger.LogNotice("Connection event received {0}", args.Payload);
             lock (_mainLock)
             {
-                if (args.Payload == 1)
+                try
                 {
-                    IsPoweredOn = true;
-
-                    if (OnPowerState != null)
+                    if (args.Payload == 1)
                     {
-                        OnPowerState(1);
+                        _logger.PrintLine("Received connected event!");
+                        _logger.LogNotice("Received connected event!");
+
+                        if (!IsPoweredOn)
+                        {
+                            IsPoweredOn = true;
+
+                            if (OnPowerState != null)
+                            {
+                                OnPowerState(1);
+                            }
+
+                            _heartbeatTimer.Reset(0, 10000);
+                        }
+                        
+                        _logger.PrintLine("Processed connected event!");
+                        _logger.LogNotice("Processed connected event!");
                     }
-                    _wsClient.SendCommand(VerifyClientKey);
-                    _heartbeatFailedTimer.Reset(30000);
+                    else
+                    {
+                        _logger.PrintLine("Received disconnected event!");
+                        _logger.LogNotice("Received disconnected event!");
+
+
+                        if (IsPoweredOn)
+                        {
+                            IsPoweredOn = false;
+                            IsRegistered = false;
+
+                            _heartbeatTimer.Stop();
+                            _heartbeatFailedTimer.Stop();
+
+                            _cmdQueue.Clear();
+
+                            if (_inputControls != null)
+                            {
+                                _inputControls.Dispose();
+                            }
+
+                            if (OnPowerState != null)
+                            {
+                                OnPowerState(0);
+                            }
+                        }
+
+                        _logger.PrintLine("Processed disconnected event!");
+                        _logger.LogNotice("Processed disconnected event!");
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    _heartbeatFailedTimer.Stop();
-                    _heartbeatTimer.Stop();
-                    _getDisplayInfoTimer.Stop();
-                    if (_inputControls != null)
-                    {
-                        _inputControls.Dispose();
-                        _inputControls = null;
-                    }
-
-                    IsPoweredOn = false;
-                    IsRegistered = false;
-
-                    if (OnPowerState != null)
-                    {
-                        OnPowerState(0);
-                    }
+                    _logger.LogException(ex);
                 }
             }
         }
 
-        private void ResetConnection()
+        public void ResetConnection()
         {
-            lock (_mainLock)
+            CrestronInvoke.BeginInvoke(x =>
             {
-                _heartbeatFailedTimer.Stop();
-                _heartbeatTimer.Stop();
-                _getDisplayInfoTimer.Stop();
-                if (_inputControls != null)
+                lock (_mainLock)
                 {
-                    _inputControls.Dispose();
-                    _inputControls = null;
-                }
+                    _heartbeatTimer.Stop();
+                    _heartbeatFailedTimer.Stop();
 
-                _wsClient.Disconnect();
-                _wsClient.Connect();
-            }
+                    _wsClient.Disconnect();
+
+                    using(var ev = new CEvent(false, false))
+                    // ReSharper disable once AccessToDisposedClosure
+                    using (new CTimer(_ => ev.Set(), 2500))
+                    {
+                        ev.Wait();
+                    }
+
+                    _wsClient.Connect();
+                }
+            });
+        }
+
+        public void SendCommand(Command commandToSend)
+        {
+            _cmdQueue.Enqueue(commandToSend);
         }
 
         public void PowerOn()
         {
+            _logger.PrintLine("Trying to send power on...");
             lock (_mainLock)
             {
                 if (IsPoweredOn)
+                {
+                    _logger.PrintLine("Already powered on");
                     return;
-
-                var wolPacket = new byte[1024];
-                var wolPacketIndex = 0;
-
-                for (var i = 0; i < 6; i++)
-                {
-                    wolPacket[wolPacketIndex] = 255;
-                    wolPacketIndex++;
-                }
-
-                for (var i = 0; i < 16; i++)
-                {
-                    for (var m = 0; m < _macAddress.Length; m += 2)
-                    {
-                        var mb = _macAddress.Substring(m, 2);
-                        wolPacket[wolPacketIndex] = byte.Parse(mb, NumberStyles.HexNumber);
-                        wolPacketIndex++;
-                    }
                 }
 
                 WakeOnLanUtility.SendWol(_ipAddress, _macAddress, 1);
                 CrestronEnvironment.Sleep(10);
                 WakeOnLanUtility.SendWol(_ipAddress, _macAddress, 1);
             }
+            _logger.PrintLine("Sent power on");
         }
 
         public void PowerOff()
         {
+            _logger.PrintLine("Trying to send power off...");
             lock (_mainLock)
             {
                 if (!IsPoweredOn)
+                {
+                    _logger.PrintLine("Already powered off");
                     return;
+                }
 
-                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"powerOff\",\"uri\":\"ssap://system/turnOff\"}");
+                SendCommand(new Command(CommandPriorities.Highest, "{\"type\":\"request\",\"id\":\"powerOff\",\"uri\":\"ssap://system/turnOff\"}"));
                 ResetHeartbeat(5000);
             }
+
+            _logger.PrintLine("Sent power off");
         }
 
         public void SetVolume(ushort value)
@@ -502,7 +562,7 @@ namespace LgWebOs
 
             var volume = ScaleDown(value);
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"setVolume\",\"uri\":\"ssap://audio/setVolume\",\"payload\":{\"volume\":" + volume + "}}");
+            SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"setVolume\",\"uri\":\"ssap://audio/setVolume\",\"payload\":{\"volume\":" + volume + "}}"));
         }
 
         public void IncrementVolume()
@@ -510,7 +570,7 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"volumeUp\",\"uri\":\"ssap://audio/volumeUp\"}");
+            SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"volumeUp\",\"uri\":\"ssap://audio/volumeUp\"}"));
         }
 
         public void DecrementVolume()
@@ -518,7 +578,7 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"volumeDown\",\"uri\":\"ssap://audio/volumeDown\"}");
+            SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"volumeDown\",\"uri\":\"ssap://audio/volumeDown\"}"));
         }
 
         public void SetMute(ushort value)
@@ -526,7 +586,7 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand(string.Format("{\"type\":\"request\",\"id\":\"volumeMuteOn\",\"uri\":\"ssap://audio/setMute\", \"payload\":{\"mute\": {0}}}", Convert.ToBoolean(value)));
+            SendCommand(new Command(CommandPriorities.Medium, string.Format("{\"type\":\"request\",\"id\":\"volumeMuteOn\",\"uri\":\"ssap://audio/setMute\", \"payload\":{\"mute\": {0}}}", Convert.ToBoolean(value))));
         }
 
         public void SendKey(string name)
@@ -536,18 +596,18 @@ namespace LgWebOs
 
             if (_inputControls != null)
             {
-                if (_inputControls.SocketClient.IsConnected)
+                if (_inputControls.IsConnected)
                 {
                     _inputControls.SendKey(name);
                 }
                 else
                 {
-                    _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}");
+                    SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}"));
                 }
             }
             else
             {
-                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}");
+                SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}"));
             }
         }
 
@@ -561,7 +621,7 @@ namespace LgWebOs
                 if (_externalInputs.Count < input)
                     return;
 
-                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"changeInput_" + _externalInputs[input - 1].id + "\",\"uri\":\"ssap://tv/switchInput\", \"payload\":{\"inputId\": \"" + _externalInputs[input - 1].id + "\"}}");
+                SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"changeInput_" + _externalInputs[input - 1].Id + "\",\"uri\":\"ssap://tv/switchInput\", \"payload\":{\"inputId\": \"" + _externalInputs[input - 1].Id + "\"}}"));
             }
             else
             {
@@ -574,7 +634,7 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"getExternalInputs\",\"uri\":\"ssap://tv/getExternalInputList\"}");
+            SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"getExternalInputs\",\"uri\":\"ssap://tv/getExternalInputList\"}"));
         }
 
         public void LaunchApp(ushort index)
@@ -587,7 +647,7 @@ namespace LgWebOs
                 if (_apps.Count < index)
                     return;
 
-                _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"launchApp\",\"uri\":\"ssap://com.webos.applicationManager/launch\", \"payload\": {\"id\": \"" + _apps[index - 1].id + "\"}}");
+                SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"launchApp\",\"uri\":\"ssap://com.webos.applicationManager/launch\", \"payload\": {\"id\": \"" + _apps[index - 1].Id + "\"}}"));
             }
             else
             {
@@ -600,7 +660,7 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"getAllApps\",\"uri\":\"ssap://com.webos.applicationManager/listLaunchPoints\"}");
+            SendCommand(new Command(CommandPriorities.Medium, "{\"type\":\"request\",\"id\":\"getAllApps\",\"uri\":\"ssap://com.webos.applicationManager/listLaunchPoints\"}"));
         }
 
         public void SendNotification(string value)
@@ -608,26 +668,17 @@ namespace LgWebOs
             if (!IsPoweredOn)
                 return;
 
-            _notificationOkayToSendEvent.Wait();
-            _notificationOkayToSendEvent.Reset();
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"sendNotification\",\"uri\":\"ssap://system.notifications/createToast\",\"payload\":{\"message\":\"" + value + "\"}}");
-// ReSharper disable ObjectCreationAsStatement
-            new CTimer(x => _notificationOkayToSendEvent.Set(), 500);
-// ReSharper restore ObjectCreationAsStatement
+            SendCommand(new Command(CommandPriorities.Low, "{\"type\":\"request\",\"id\":\"sendNotification\",\"uri\":\"ssap://system.notifications/createToast\",\"payload\":{\"message\":\"" + value + "\"}}"));
         }
         #endregion
 
         #region Timers
-        /// <summary>
-        /// Waits 2.5 seconds on connection to send required handshake.
-        /// </summary>
-        /// <param name="o"></param>
-        private void DisplayGetInfo(object o)
+        private void DisplayGetInfo()
         {
             if (!IsPoweredOn)
                 return;
 
-            _wsClient.SendCommand("{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}");
+            SendCommand(new Command(CommandPriorities.Highest, "{\"type\":\"request\",\"id\":\"getInputSocket\",\"uri\":\"ssap://com.webos.service.networkinput/getPointerInputSocket\"}"));
             GetApps();
             GetInputs();
         }
@@ -656,13 +707,20 @@ namespace LgWebOs
 
         private void Dispose(bool disposing)
         {
+            if (Disposed) return;
+
             Disposed = true;
 
             if (disposing)
             {
-                _getDisplayInfoTimer.Dispose();
-                _heartbeatFailedTimer.Dispose();
+                _heartbeatTimer.Stop();
+                _heartbeatFailedTimer.Stop();
                 _heartbeatTimer.Dispose();
+                _heartbeatFailedTimer.Dispose();
+
+                _cmdQueueDequeuer.Stop();
+                _cmdQueueDequeuer.Dispose();
+                _cmdQueue.Clear();
                 
                 if(_inputControls != null) _inputControls.Dispose();
                 _wsClient.Dispose();

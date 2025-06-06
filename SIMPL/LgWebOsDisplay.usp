@@ -6,7 +6,7 @@
 #ENABLE_STACK_CHECKING
 #ENABLE_TRACE
 
-Digital_Input PowerOn, PowerOff, _skip_, VolumeUp, VolumeDown, VolumeMuteOn, VolumeMuteOff;
+Digital_Input PowerOn, PowerOff, ResetConnection, VolumeUp, VolumeDown, VolumeMuteOn, VolumeMuteOff;
 Digital_Input _skip_, KeyUp, KeyDown, KeyLeft, KeyRight, KeyHome, KeyBack, KeySelect, KeyExit, KeyInfo, KeyMenu, KeyRed, KeyGreen, KeyYellow, KeyBlue, KeyPlay, KeyPause, KeyStop;
 Digital_Input _skip_, Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Key8, Key9;
 Digital_Input _skip_, GetInputs, GetApps;
@@ -56,6 +56,11 @@ Push PowerOn
 Push PowerOff
 {
     webOsDisplay.PowerOff();
+}
+
+Push ResetConnection
+{
+    webOsDisplay.ResetConnection();
 }
 
 Push VolumeUp

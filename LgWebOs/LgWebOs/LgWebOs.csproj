@@ -74,14 +74,9 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Data" />
-    <Reference Include="WS_Client, Version=1.0.0.20230, Culture=neutral, processorArchitecture=MSIL">
+    <Reference Include="XSigUtility, Version=1.0.8756.12510, Culture=neutral, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\..\..\WebSocketClient\WS_Client\WS_Client\bin\Debug\WS_Client.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="XSigUtility, Version=1.0.7292.20622, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\..\..\XSigUtilityLibrary\XSigUtility\bin\Debug\XSigUtility.dll</HintPath>
+      <HintPath>..\..\..\..\..\OneDrive - GUSS\Crestron Modules\Mat\SIMPLSharp Projects\XSigUtilityLibrary\XSigUtility\bin\Debug\XSigUtility.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>

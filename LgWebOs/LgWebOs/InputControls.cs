@@ -1,27 +1,40 @@
 ﻿using System;
 using Guss.Communications.Sockets;
-using Guss.ModuleFramework.Logging;
+using Guss.Communications.ModuleFramework.Logging;
 
 namespace LgWebOs
 {
     internal class InputControls : IDisposable
     {
         private bool _disposed;
-        internal WebSocketClient SocketClient;
+        private readonly WebSocketClient _socketClient;
+
+        internal bool IsConnected
+        {
+            get
+            {
+                if (_socketClient == null) return false;
+
+                return _socketClient.IsConnected;
+            }
+        }
 
         internal InputControls(string ipAddress, ushort port, string path, ILogger logger)
         {
-            SocketClient = new WebSocketClient(logger);
+            _socketClient = new WebSocketClient(new Logger("LgWebOs -- Input Controls")
+            {
+                DebugLevel = logger.DebugLevel
+            });
 
             path = path.Replace("ws:", string.Empty);
-            SocketClient.Connect("ws://" + ipAddress + path, port);
+            _socketClient.Connect("ws://" + ipAddress + path, port);
         }
 
         internal void SendKey(string key)
         {
             key = string.Format("type:button\nname:{0}\n\n", key.ToUpper());
 
-            SocketClient.SendCommand(key);
+            _socketClient.SendCommand(key);
         }
 
         public void Dispose()
@@ -38,8 +51,8 @@ namespace LgWebOs
 
             if(disposing)
             {
-                if(SocketClient != null)
-                    SocketClient.Dispose();
+                if(_socketClient != null)
+                    _socketClient.Dispose();
             }
         }
     }

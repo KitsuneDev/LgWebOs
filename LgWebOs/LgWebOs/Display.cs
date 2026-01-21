@@ -8,6 +8,7 @@ using Crestron.SimplSharp.CrestronIO;
 using Guss.Communications.Sockets;
 using Guss.Communications.ModuleFramework.Logging;
 using Guss.ModuleFramework;
+using Guss.ModuleFramework.Events;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using XSigUtilityLibrary;
@@ -35,30 +36,21 @@ namespace LgWebOs
         private string _macAddress;
         private string _clientKey;
         private string _keyFilePath;
+        private string _currentInput;
         #endregion
 
-        #region Delegates
-        public delegate void PowerState(ushort state);
-        public delegate void VolumeValue(ushort value);
-        public delegate void VolumeMuteState(ushort state);
-        public delegate void CurrentInputValue(ushort valuet);
-        public delegate void InputCount(ushort count);
-        public delegate void ExternalInputNames(SimplSharpString xsig);
-        public delegate void ExternalInputIcons(SimplSharpString xsig);
-        public delegate void AppCount(ushort count);
-        public delegate void AppNames(SimplSharpString xsig);
-        public delegate void AppIcons(SimplSharpString xsig);
+        #region Events
 
-        public PowerState OnPowerState { get; set; }
-        public VolumeValue OnVolumeValue { get; set; }
-        public VolumeMuteState OnVolumeMuteState { get; set; }
-        public CurrentInputValue OnCurrentInputValue { get; set; }
-        public InputCount OnInputCount { get; set; }
-        public ExternalInputNames OnExternalInputNames { get; set; }
-        public ExternalInputIcons OnExternalInputIcons { get; set; }
-        public AppCount OnAppCount { get; set; }
-        public AppNames OnAppNames { get; set; }
-        public AppIcons OnAppIcons { get; set; }
+        public event UShortEventHandler PowerStateChanged;
+        public event UShortEventHandler VolumeValueChanged;
+        public event UShortEventHandler VolumeMuteStateChanged;
+        public event UShortEventHandler CurrentInputValueChanged;
+        public event UShortEventHandler InputCountChanged;
+        public event StringEventHandler ExternalInputNamesChanged;
+        public event StringEventHandler ExternalInputIconsChanged;
+        public event UShortEventHandler AppCountChanged;
+        public event StringEventHandler AppNamesChanged;
+        public event StringEventHandler AppIconsChanged;
         #endregion
 
         #region Public Variables
@@ -73,7 +65,10 @@ namespace LgWebOs
 
         public bool IsPoweredOn { get; private set; }
 
-        public string CurrentInput { get; private set; }
+        public string CurrentInput
+        {
+            get { return _currentInput; }
+        }
 
         #endregion
 
@@ -164,10 +159,7 @@ namespace LgWebOs
 
                 IsInitialized = true;
 
-                if (OnPowerState != null)
-                {
-                    OnPowerState(0);
-                }
+                OnUShortEvent(PowerStateChanged, new UShortEventArgs(0));
 
                 _wsClient.Connect();
             }
@@ -200,11 +192,11 @@ namespace LgWebOs
                     {
                         case "register_0":
                             if (response["payload"]["client-key"] != null)
-                            {      
-                                _clientKey = response["payload"]["client-key"].ToObject<string>();
-
+                            {     
                                 lock (_mainLock)
                                 {
+                                    _clientKey = response["payload"]["client-key"].ToObject<string>();
+
                                     using (var writer = new StreamWriter(File.Create(_keyFilePath)))
                                     {
                                         writer.Write(_clientKey);
@@ -241,8 +233,11 @@ namespace LgWebOs
                             }
                             break;
                         case "getInputSocket":
-                            _inputControls = new InputControls(_ipAddress, _port,
-                                response["payload"]["socketPath"].ToObject<string>(), _logger);
+                            lock (_mainLock)
+                            {
+                                _inputControls = new InputControls(_ipAddress, _port,
+                                    response["payload"]["socketPath"].ToObject<string>(), _logger);
+                            }
                             SendCommand(new Command(CommandPriorities.Low,
                                 "{\"type\":\"request\",\"id\":\"getVolume\",\"uri\":\"ssap://audio/getVolume\"}"));
                             break;
@@ -250,62 +245,70 @@ namespace LgWebOs
                             if (response["id"].ToObject<string>().Contains("changeInput_"))
                             {
                                 if (!response["payload"]["returnValue"].ToObject<bool>()) return;
-                                CurrentInput = response["id"].ToObject<string>()
-                                    .Replace("changeInput_", string.Empty);
 
-
-                                var input = _externalInputs.Find(x => x.Id == CurrentInput);
-                                if (input != null)
+                                ExternalInput input;
+                                ushort index;
+                                lock (_mainLock)
                                 {
-                                    if (OnCurrentInputValue != null)
-                                    {
-                                        OnCurrentInputValue(Convert.ToUInt16(_externalInputs.IndexOf(input)));
-                                    }
+                                    _currentInput = response["id"].ToObject<string>()
+                                        .Replace("changeInput_", string.Empty);
+
+                                    input = _externalInputs.Find(x => x.Id == _currentInput);
+                                    index = Convert.ToUInt16(_externalInputs.IndexOf(input));
                                 }
+
+                                if (input == null) return;
+
+                                OnUShortEvent(CurrentInputValueChanged, new UShortEventArgs(index));
                             }
                             else
                                 switch (response["id"].ToObject<string>())
                                 {
                                     case "getExternalInputs":
                                     {
-                                        _externalInputs =
-                                            JsonConvert.DeserializeObject<List<ExternalInput>>(
-                                                response["payload"]["devices"].ToString());
-
                                         var inputNames = new List<string>();
                                         var inputIcons = new List<string>();
-
-                                        foreach (var input in _externalInputs)
+                                        ushort count;
+                                        lock (_mainLock)
                                         {
-                                            inputNames.Add(input.Label);
-                                            inputIcons.Add(input.Icon.Replace("http:",
-                                                string.Format("http://{0}:{1}", _ipAddress, _port)));
+                                            _externalInputs =
+                                                JsonConvert.DeserializeObject<List<ExternalInput>>(
+                                                    response["payload"]["devices"].ToString());
+
+                                            foreach (var input in _externalInputs)
+                                            {
+                                                inputNames.Add(input.Label);
+                                                inputIcons.Add(input.Icon.Replace("http:",
+                                                    string.Format("http://{0}:{1}", _ipAddress, _port)));
+                                            }
+
+                                            count = Convert.ToUInt16(_externalInputs.Count);
                                         }
 
-                                        if (OnInputCount != null)
-                                        {
-                                            OnInputCount(Convert.ToUInt16(_externalInputs.Count));
-                                        }
+                                        OnUShortEvent(InputCountChanged, new UShortEventArgs(count));
 
 
                                         foreach (var encodedBytes in inputNames.Select(
                                             inputName =>
                                                 XSigHelpers.GetBytes(inputNames.IndexOf(inputName) + 1,
-                                                    inputName)).Where(encodedBytes => OnExternalInputNames != null))
+                                                    inputName))
+                                            )
                                         {
-                                            OnExternalInputNames(Encoding.GetEncoding(28591)
-                                                .GetString(encodedBytes, 0, encodedBytes.Length));
+
+                                            OnStringEvent(ExternalInputNamesChanged,
+                                                new StringEventArgs(Encoding.GetEncoding(28591)
+                                                    .GetString(encodedBytes, 0, encodedBytes.Length)));
                                         }
 
-                                        if (OnExternalInputIcons == null) return;
                                         foreach (
                                             var encodedBytes in
                                                 inputIcons.Select(
                                                     inputIcon => XSigHelpers.GetBytes(inputIcons.IndexOf(inputIcon) + 1,
                                                         inputIcon)))
                                         {
-                                            OnExternalInputIcons(Encoding.GetEncoding(28591)
-                                                .GetString(encodedBytes, 0, encodedBytes.Length));
+
+                                            OnStringEvent(ExternalInputIconsChanged, new StringEventArgs(Encoding.GetEncoding(28591)
+                                                .GetString(encodedBytes, 0, encodedBytes.Length)));
                                         }
                                     }
                                         break;
@@ -325,27 +328,25 @@ namespace LgWebOs
                                                 string.Format("http://{0}:{1}", _ipAddress, _port)));
                                         }
 
-                                        if (OnAppCount != null)
-                                        {
-                                            OnAppCount(Convert.ToUInt16(_apps.Count));
-                                        }
+                                        OnUShortEvent(AppCountChanged, new UShortEventArgs(Convert.ToUInt16(_apps.Count)));
 
 
                                         foreach (var encodedBytes in appNames.Select(
                                             appName => XSigHelpers.GetBytes(appNames.IndexOf(appName) + 1,
-                                                appName)).Where(encodedBytes => OnAppNames != null))
+                                                appName)))
                                         {
-                                            OnAppNames(Encoding.GetEncoding(28591)
-                                                .GetString(encodedBytes, 0, encodedBytes.Length));
+
+                                            OnStringEvent(AppNamesChanged, new StringEventArgs(Encoding.GetEncoding(28591)
+                                                .GetString(encodedBytes, 0, encodedBytes.Length)));
                                         }
 
 
                                         foreach (var encodedBytes in appIcons.Select(
                                             appIcon => XSigHelpers.GetBytes(appIcons.IndexOf(appIcon) + 1,
-                                                appIcon)).Where(encodedBytes => OnAppIcons != null))
+                                                appIcon)))
                                         {
-                                            OnAppIcons(Encoding.GetEncoding(28591)
-                                                .GetString(encodedBytes, 0, encodedBytes.Length));
+                                            OnStringEvent(AppIconsChanged, new StringEventArgs(Encoding.GetEncoding(28591)
+                                                .GetString(encodedBytes, 0, encodedBytes.Length)));
                                         }
                                     }
                                         break;
@@ -375,43 +376,27 @@ namespace LgWebOs
                                         var value =
                                             ScaleUp(Convert.ToInt16(response["payload"]["volume"].ToObject<string>()));
 
-                                        if (OnVolumeValue != null)
-                                        {
-                                            OnVolumeValue(Convert.ToUInt16(value));
-                                        }
-
+                                        OnUShortEvent(VolumeValueChanged, new UShortEventArgs(Convert.ToUInt16(value)));
 
                                         if (response["payload"]["muted"].ToObject<bool>())
                                         {
-                                            if (OnVolumeMuteState != null)
-                                            {
-                                                OnVolumeMuteState(1);
-                                            }
+                                            OnUShortEvent(VolumeMuteStateChanged, new UShortEventArgs(1));
                                         }
                                         else if (!response["payload"]["muted"].ToObject<bool>())
                                         {
-                                            if (OnVolumeMuteState != null)
-                                            {
-                                                OnVolumeMuteState(0);
-                                            }
+                                            OnUShortEvent(VolumeMuteStateChanged, new UShortEventArgs(0));
                                         }
                                         break;
                                     case "volumeMuteOn":
                                         if (response["payload"]["returnValue"].ToObject<bool>())
                                         {
-                                            if (OnVolumeMuteState != null)
-                                            {
-                                                OnVolumeMuteState(1);
-                                            }
+                                            OnUShortEvent(VolumeMuteStateChanged, new UShortEventArgs(1));
                                         }
                                         break;
                                     case "volumeMuteOff":
                                         if (response["payload"]["returnValue"].ToObject<bool>())
                                         {
-                                            if (OnVolumeMuteState != null)
-                                            {
-                                                OnVolumeMuteState(0);
-                                            }
+                                            OnUShortEvent(VolumeMuteStateChanged, new UShortEventArgs(0));
                                         }
                                         break;
                                 }
@@ -442,10 +427,7 @@ namespace LgWebOs
                         {
                             IsPoweredOn = true;
 
-                            if (OnPowerState != null)
-                            {
-                                OnPowerState(1);
-                            }
+                            OnUShortEvent(PowerStateChanged, new UShortEventArgs(1));
 
                             _heartbeatTimer.Reset(0, 10000);
                         }
@@ -474,10 +456,7 @@ namespace LgWebOs
                                 _inputControls.Dispose();
                             }
 
-                            if (OnPowerState != null)
-                            {
-                                OnPowerState(0);
-                            }
+                            OnUShortEvent(PowerStateChanged, new UShortEventArgs(0));
                         }
 
                         _logger.PrintLine("Processed disconnected event!");
@@ -699,6 +678,22 @@ namespace LgWebOs
             return Convert.ToInt32(rounded);
         }
         #endregion
+
+        private void OnUShortEvent(UShortEventHandler handler, UShortEventArgs e)
+        {
+            var h = handler;
+
+            if (h == null) return;
+            h.Invoke(this, e);
+        }
+
+        private void OnStringEvent(StringEventHandler handler, StringEventArgs e)
+        {
+            var h = handler;
+
+            if (h == null) return;
+            h.Invoke(this, e);
+        }
 
         public void Dispose()
         {

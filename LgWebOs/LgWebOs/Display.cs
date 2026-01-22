@@ -13,6 +13,11 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using XSigUtilityLibrary;
 using LgWebOs.Utils;
+using LgWebOs.Events;
+using StringEventArgs = LgWebOs.Events.StringEventArgs;
+using StringEventHandler = LgWebOs.Events.StringEventHandler;
+using UShortEventArgs = LgWebOs.Events.UShortEventArgs;
+using UShortEventHandler = LgWebOs.Events.UShortEventHandler;
 
 namespace LgWebOs
 {
@@ -40,7 +45,6 @@ namespace LgWebOs
         #endregion
 
         #region Events
-
         public event UShortEventHandler PowerStateChanged;
         public event UShortEventHandler VolumeValueChanged;
         public event UShortEventHandler VolumeMuteStateChanged;

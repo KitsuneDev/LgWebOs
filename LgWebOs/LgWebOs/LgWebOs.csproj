@@ -1,23 +1,21 @@
-﻿<Project ToolsVersion="3.5" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\packages\Crestron.SimplSharp.SDK.SandboxLibrary.2.19.16-beta1\build\Crestron.SimplSharp.SDK.SandboxLibrary.props" Condition="Exists('..\packages\Crestron.SimplSharp.SDK.SandboxLibrary.2.19.16-beta1\build\Crestron.SimplSharp.SDK.SandboxLibrary.props')" />
+  
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProductVersion>9.0.30729</ProductVersion>
-    <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{8E7CE276-47B4-4611-9B43-2D8FB60BEC17}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>LgWebOs</RootNamespace>
     <AssemblyName>LgWebOs</AssemblyName>
-    <ProjectTypeGuids>{0B4745B0-194B-4BB6-8E21-E9057CA92500};{4D628B5B-2FBC-4AA6-8C16-197242AEB884};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
-    <PlatformFamilyName>WindowsCE</PlatformFamilyName>
-    <PlatformID>E2BECB1F-8C8C-41ba-B736-9BE7D946A398</PlatformID>
-    <OSVersion>5.0</OSVersion>
+    <FileAlignment>512</FileAlignment>
     <DeployDirSuffix>SmartDeviceProject1</DeployDirSuffix>
     <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
-    <NativePlatformName>Windows CE</NativePlatformName>
-    <FormFactorID>
-    </FormFactorID>
+    <DependenciesDir>$(MSBuildProjectDirectory)\..\Dependencies\</DependenciesDir>
+    <AssemblySearchPaths>$(AssemblySearchPaths);$(DependenciesDir)</AssemblySearchPaths>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <AllowedReferenceRelatedFileExtensions>.allowedReferenceRelatedFileExtensions</AllowedReferenceRelatedFileExtensions>
@@ -46,19 +44,21 @@
     <GenerateSerializationAssemblies>off</GenerateSerializationAssemblies>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Guss.Communications, Version=1.0.0.39314, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\Dependencies\Guss.Communications.dll</HintPath>
+    <Reference Include="Guss.Communications">
+      <HintPath>..\..\Dependencies\Guss.Communications.dll</HintPath>
     </Reference>
-    <Reference Include="Guss.ModuleFramework, Version=1.0.0.13550, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\Dependencies\Guss.ModuleFramework.dll</HintPath>
+    <Reference Include="Guss.ModuleFramework">
+      <HintPath>..\..\Dependencies\Guss.Communications.dll</HintPath>
     </Reference>
     <Reference Include="mscorlib" />
+    <Reference Include="SimplSharpAutoUpdateInterface" />
+    <Reference Include="SimplSharpCryptographyInterface" />
     <Reference Include="SimplSharpCustomAttributesInterface, Version=1.0.0.0, Culture=neutral, PublicKeyToken=1099c178b3b54c3b, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>C:\ProgramData\Crestron\SDK\SimplSharpCustomAttributesInterface.dll</HintPath>
     </Reference>
+    <Reference Include="SimplSharpCWSHelperInterface" />
+    <Reference Include="SimplSharpExchangeWebServices.dll" />
     <Reference Include="SimplSharpHelperInterface, Version=1.0.0.0, Culture=neutral, PublicKeyToken=1099c178b3b54c3b, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>C:\ProgramData\Crestron\SDK\SimplSharpHelperInterface.dll</HintPath>
@@ -67,15 +67,20 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>C:\ProgramData\Crestron\SDK\SimplSharpNewtonsoft.dll</HintPath>
     </Reference>
+    <Reference Include="SimplSharpOnvifInterface.dll" />
     <Reference Include="SimplSharpReflectionInterface, Version=1.0.5583.25238, Culture=neutral, PublicKeyToken=1099c178b3b54c3b, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>C:\ProgramData\Crestron\SDK\SimplSharpReflectionInterface.dll</HintPath>
     </Reference>
+    <Reference Include="SimplSharpServiceEndpoint.dll" />
+    <Reference Include="SimplSharpSQLHelperInterface.dll" />
+    <Reference Include="SimplSharpTimerEventInterface.dll" />
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Data" />
-    <Reference Include="XSigUtility, Version=1.0.8756.12510, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
+    <Reference Include="System.Data.SqlClient" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="XSigUtility">
       <HintPath>..\Dependencies\XSigUtility.dll</HintPath>
     </Reference>
   </ItemGroup>
@@ -90,13 +95,24 @@
     <Compile Include="InputControls.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Utils\KeyUtils.cs" />
+    <None Include="packages.config" />
     <None Include="Properties\ControlSystem.cfg" />
   </ItemGroup>
-  <Import Project="$(MSBuildBinPath)\Microsoft.CompactFramework.CSharp.targets" />
   <PropertyGroup>
     <PostBuildEvent>rem  S# preparation will execute after these operations
 copy "$(TargetDir)Guss.Communications.dll" "$(SolutionDir)Dependencies\"
 copy "$(TargetDir)Guss.ModuleFramework.dll" "$(SolutionDir)Dependencies\"
 copy "$(TargetDir)XSigUtility.dll" "$(SolutionDir)Dependencies\"</PostBuildEvent>
   </PropertyGroup>
+  
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Enable NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105.The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\packages\Crestron.SimplSharp.SDK.Library.2.19.16\build\Crestron.SimplSharp.SDK.Library.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Crestron.SimplSharp.SDK.Library.2.19.16\build\Crestron.SimplSharp.SDK.Library.targets'))" />
+    <Error Condition="!Exists('..\packages\Crestron.SimplSharp.SDK.SandboxLibrary.2.19.16-beta1\build\Crestron.SimplSharp.SDK.SandboxLibrary.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Crestron.SimplSharp.SDK.SandboxLibrary.2.19.16-beta1\build\Crestron.SimplSharp.SDK.SandboxLibrary.props'))" />
+    <Error Condition="!Exists('..\packages\Crestron.SimplSharp.SDK.SandboxLibrary.2.19.16-beta1\build\Crestron.SimplSharp.SDK.SandboxLibrary.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Crestron.SimplSharp.SDK.SandboxLibrary.2.19.16-beta1\build\Crestron.SimplSharp.SDK.SandboxLibrary.targets'))" />
+  </Target>
+  <Import Project="..\packages\Crestron.SimplSharp.SDK.Library.2.19.16\build\Crestron.SimplSharp.SDK.Library.targets" Condition="Exists('..\packages\Crestron.SimplSharp.SDK.Library.2.19.16\build\Crestron.SimplSharp.SDK.Library.targets')" />
+  <Import Project="..\packages\Crestron.SimplSharp.SDK.SandboxLibrary.2.19.16-beta1\build\Crestron.SimplSharp.SDK.SandboxLibrary.targets" Condition="Exists('..\packages\Crestron.SimplSharp.SDK.SandboxLibrary.2.19.16-beta1\build\Crestron.SimplSharp.SDK.SandboxLibrary.targets')" />
 </Project>

@@ -1,10 +1,12 @@
 #SYMBOL_NAME "LG WebOS Display"
 
-#USER_SIMPLSHARP_LIBRARY "LgWebOs"
-
 #DEFAULT_VOLATILE
 #ENABLE_STACK_CHECKING
 #ENABLE_TRACE
+#ENABLE_DYNAMIC
+
+#USER_SIMPLSHARP_LIBRARY "LgWebOs"
+
 
 Digital_Input PowerOn, PowerOff, _skip_, VolumeUp, VolumeDown, VolumeMuteOn, VolumeMuteOff;
 Digital_Input _skip_, KeyUp, KeyDown, KeyLeft, KeyRight, KeyHome, KeyBack, KeySelect, KeyExit, KeyInfo, KeyMenu, KeyRed, KeyGreen, KeyYellow, KeyBlue, KeyPlay, KeyPause, KeyStop;
@@ -253,12 +255,12 @@ Change SendNotification
 	_disp.SendNotification(SendNotification);
 }
 
-eventhandler OnPowerStateChanged(Display sender,UShortEventArgs args)
+eventhandler OnPowerStateChanged(Display sender, LgUShortEventArgs args)
 {
 	
 }
 
-eventhandler newPowerState(Display sender, UShortEventArgs args)
+eventhandler newPowerState(Display sender, LgUShortEventArgs args)
 {
 	if(args.Payload)
 	{
@@ -272,12 +274,12 @@ eventhandler newPowerState(Display sender, UShortEventArgs args)
 	}
 }
 
-eventhandler newVolumeValue(Display sender, UShortEventArgs args)
+eventhandler newVolumeValue(Display sender, LgUShortEventArgs args)
 {
 	VolumeValue = args.Payload;
 }
 
-eventhandler newVolumeMuteState(Display sender, UShortEventArgs args)
+eventhandler newVolumeMuteState(Display sender, LgUShortEventArgs args)
 {
 	if(args.Payload)
 	{
@@ -291,37 +293,37 @@ eventhandler newVolumeMuteState(Display sender, UShortEventArgs args)
 	}
 }
 
-eventhandler newCurrentInputValue(Display sender, UShortEventArgs args)
+eventhandler newCurrentInputValue(Display sender, LgUShortEventArgs args)
 {
 	CurrentInput = args.Payload + 1;
 }
 
-eventhandler newInputCount(Display sender, UShortEventArgs args)
+eventhandler newInputCount(Display sender, LgUShortEventArgs args)
 {
 	TotalInputs = args.Payload;
 }
 
-eventhandler newExternalInputNames(Display sender, StringEventArgs args)
+eventhandler newExternalInputNames(Display sender, LgStringEventArgs args)
 {
 	InputNamesXsig = args.Payload;
 }
 
-eventhandler newExternalInputIcons(Display sender, StringEventArgs args)
+eventhandler newExternalInputIcons(Display sender, LgStringEventArgs args)
 {
 	InputIconsXsig = args.Payload;
 }
 
-eventhandler newAppCount(Display sender, UShortEventArgs args)
+eventhandler newAppCount(Display sender, LgUShortEventArgs args)
 {
 	TotalApps = args.Payload;
 }
 
-eventhandler newAppNames(Display sender, StringEventArgs args)
+eventhandler newAppNames(Display sender, LgStringEventArgs args)
 {
 	AppNamesXsig = args.Payload;
 }
 
-eventhandler newAppIcons(Display sender, StringEventArgs args)
+eventhandler newAppIcons(Display sender, LgStringEventArgs args)
 {
 	AppIconsXsig = args.Payload;
 }

@@ -87,9 +87,9 @@
   <ItemGroup>
     <Compile Include="App.cs" />
     <Compile Include="Display.cs" />
-    <Compile Include="Events\StringEventArgs.cs" />
+    <Compile Include="Events\LgStringEventArgs.cs" />
     <Compile Include="Events\StringEventHandler.cs" />
-    <Compile Include="Events\UShortEventArgs.cs" />
+    <Compile Include="Events\LgUShortEventArgs.cs" />
     <Compile Include="Events\UShortEventHandler.cs" />
     <Compile Include="ExternalInput.cs" />
     <Compile Include="InputControls.cs" />
@@ -97,6 +97,11 @@
     <Compile Include="Utils\KeyUtils.cs" />
     <None Include="packages.config" />
     <None Include="Properties\ControlSystem.cfg" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\SIMPL\LG Web OS Display.usp">
+      <Link>LG Web OS Display.usp</Link>
+    </None>
   </ItemGroup>
   <PropertyGroup>
     <PostBuildEvent>rem  S# preparation will execute after these operations

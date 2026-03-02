@@ -14,10 +14,6 @@ using Newtonsoft.Json.Linq;
 using XSigUtilityLibrary;
 using LgWebOs.Utils;
 using LgWebOs.Events;
-using StringEventArgs = LgWebOs.Events.StringEventArgs;
-using StringEventHandler = LgWebOs.Events.StringEventHandler;
-using UShortEventArgs = LgWebOs.Events.UShortEventArgs;
-using UShortEventHandler = LgWebOs.Events.UShortEventHandler;
 
 namespace LgWebOs
 {
@@ -45,16 +41,16 @@ namespace LgWebOs
         #endregion
 
         #region Events
-        public event UShortEventHandler PowerStateChanged;
-        public event UShortEventHandler VolumeValueChanged;
-        public event UShortEventHandler VolumeMuteStateChanged;
-        public event UShortEventHandler CurrentInputValueChanged;
-        public event UShortEventHandler InputCountChanged;
-        public event StringEventHandler ExternalInputNamesChanged;
-        public event StringEventHandler ExternalInputIconsChanged;
-        public event UShortEventHandler AppCountChanged;
-        public event StringEventHandler AppNamesChanged;
-        public event StringEventHandler AppIconsChanged;
+        public event EventHandler<LgUShortEventArgs> PowerStateChanged;
+        public event EventHandler<LgUShortEventArgs> VolumeValueChanged;
+        public event EventHandler<LgUShortEventArgs> VolumeMuteStateChanged;
+        public event EventHandler<LgUShortEventArgs> CurrentInputValueChanged;
+        public event EventHandler<LgUShortEventArgs> InputCountChanged;
+        public event EventHandler<LgStringEventArgs> ExternalInputNamesChanged;
+        public event EventHandler<LgStringEventArgs> ExternalInputIconsChanged;
+        public event EventHandler<LgUShortEventArgs> AppCountChanged;
+        public event EventHandler<LgStringEventArgs> AppNamesChanged;
+        public event EventHandler<LgStringEventArgs> AppIconsChanged;
         #endregion
 
         #region Public Variables
@@ -163,7 +159,7 @@ namespace LgWebOs
 
                 IsInitialized = true;
 
-                OnUShortEvent(PowerStateChanged, new UShortEventArgs(0));
+                OnUShortEvent(PowerStateChanged, new LgUShortEventArgs() {Payload = 0});
 
                 _wsClient.Connect();
             }
@@ -263,7 +259,7 @@ namespace LgWebOs
 
                                 if (input == null) return;
 
-                                OnUShortEvent(CurrentInputValueChanged, new UShortEventArgs(index));
+                                OnUShortEvent(CurrentInputValueChanged, new LgUShortEventArgs() {Payload = index});
                             }
                             else
                                 switch (response["id"].ToObject<string>())
@@ -289,7 +285,7 @@ namespace LgWebOs
                                             count = Convert.ToUInt16(_externalInputs.Count);
                                         }
 
-                                        OnUShortEvent(InputCountChanged, new UShortEventArgs(count));
+                                        OnUShortEvent(InputCountChanged, new LgUShortEventArgs() {Payload = count});
 
 
                                         foreach (var encodedBytes in inputNames.Select(
@@ -300,8 +296,8 @@ namespace LgWebOs
                                         {
 
                                             OnStringEvent(ExternalInputNamesChanged,
-                                                new StringEventArgs(Encoding.GetEncoding(28591)
-                                                    .GetString(encodedBytes, 0, encodedBytes.Length)));
+                                                new LgStringEventArgs() {Payload = Encoding.GetEncoding(28591)
+                                                    .GetString(encodedBytes, 0, encodedBytes.Length)});
                                         }
 
                                         foreach (
@@ -311,8 +307,8 @@ namespace LgWebOs
                                                         inputIcon)))
                                         {
 
-                                            OnStringEvent(ExternalInputIconsChanged, new StringEventArgs(Encoding.GetEncoding(28591)
-                                                .GetString(encodedBytes, 0, encodedBytes.Length)));
+                                            OnStringEvent(ExternalInputIconsChanged, new LgStringEventArgs() {Payload = Encoding.GetEncoding(28591)
+                                                .GetString(encodedBytes, 0, encodedBytes.Length)});
                                         }
                                     }
                                         break;
@@ -332,7 +328,7 @@ namespace LgWebOs
                                                 string.Format("http://{0}:{1}", _ipAddress, _port)));
                                         }
 
-                                        OnUShortEvent(AppCountChanged, new UShortEventArgs(Convert.ToUInt16(_apps.Count)));
+                                        OnUShortEvent(AppCountChanged, new LgUShortEventArgs() {Payload = Convert.ToUInt16(_apps.Count)});
 
 
                                         foreach (var encodedBytes in appNames.Select(
@@ -340,8 +336,8 @@ namespace LgWebOs
                                                 appName)))
                                         {
 
-                                            OnStringEvent(AppNamesChanged, new StringEventArgs(Encoding.GetEncoding(28591)
-                                                .GetString(encodedBytes, 0, encodedBytes.Length)));
+                                            OnStringEvent(AppNamesChanged, new LgStringEventArgs() {Payload = Encoding.GetEncoding(28591)
+                                                .GetString(encodedBytes, 0, encodedBytes.Length)});
                                         }
 
 
@@ -349,8 +345,8 @@ namespace LgWebOs
                                             appIcon => XSigHelpers.GetBytes(appIcons.IndexOf(appIcon) + 1,
                                                 appIcon)))
                                         {
-                                            OnStringEvent(AppIconsChanged, new StringEventArgs(Encoding.GetEncoding(28591)
-                                                .GetString(encodedBytes, 0, encodedBytes.Length)));
+                                            OnStringEvent(AppIconsChanged, new LgStringEventArgs() {Payload = Encoding.GetEncoding(28591)
+                                                .GetString(encodedBytes, 0, encodedBytes.Length)});
                                         }
                                     }
                                         break;
@@ -380,27 +376,27 @@ namespace LgWebOs
                                         var value =
                                             ScaleUp(Convert.ToInt16(response["payload"]["volume"].ToObject<string>()));
 
-                                        OnUShortEvent(VolumeValueChanged, new UShortEventArgs(Convert.ToUInt16(value)));
+                                        OnUShortEvent(VolumeValueChanged, new LgUShortEventArgs() {Payload = Convert.ToUInt16(value)});
 
                                         if (response["payload"]["muted"].ToObject<bool>())
                                         {
-                                            OnUShortEvent(VolumeMuteStateChanged, new UShortEventArgs(1));
+                                            OnUShortEvent(VolumeMuteStateChanged, new LgUShortEventArgs() {Payload = 1});
                                         }
                                         else if (!response["payload"]["muted"].ToObject<bool>())
                                         {
-                                            OnUShortEvent(VolumeMuteStateChanged, new UShortEventArgs(0));
+                                            OnUShortEvent(VolumeMuteStateChanged, new LgUShortEventArgs() {Payload = 0});
                                         }
                                         break;
                                     case "volumeMuteOn":
                                         if (response["payload"]["returnValue"].ToObject<bool>())
                                         {
-                                            OnUShortEvent(VolumeMuteStateChanged, new UShortEventArgs(1));
+                                            OnUShortEvent(VolumeMuteStateChanged, new LgUShortEventArgs() {Payload = 0});
                                         }
                                         break;
                                     case "volumeMuteOff":
                                         if (response["payload"]["returnValue"].ToObject<bool>())
                                         {
-                                            OnUShortEvent(VolumeMuteStateChanged, new UShortEventArgs(0));
+                                            OnUShortEvent(VolumeMuteStateChanged, new LgUShortEventArgs() {Payload = 0});
                                         }
                                         break;
                                 }
@@ -431,7 +427,7 @@ namespace LgWebOs
                         {
                             IsPoweredOn = true;
 
-                            OnUShortEvent(PowerStateChanged, new UShortEventArgs(1));
+                            OnUShortEvent(PowerStateChanged, new LgUShortEventArgs() {Payload = 1});
 
                             _heartbeatTimer.Reset(0, 10000);
                         }
@@ -460,7 +456,7 @@ namespace LgWebOs
                                 _inputControls.Dispose();
                             }
 
-                            OnUShortEvent(PowerStateChanged, new UShortEventArgs(0));
+                            OnUShortEvent(PowerStateChanged, new LgUShortEventArgs() {Payload = 0});
                         }
 
                         _logger.PrintLine("Processed disconnected event!");
@@ -683,7 +679,7 @@ namespace LgWebOs
         }
         #endregion
 
-        private void OnUShortEvent(UShortEventHandler handler, UShortEventArgs e)
+        private void OnUShortEvent(EventHandler<LgUShortEventArgs> handler, LgUShortEventArgs e)
         {
             var h = handler;
 
@@ -691,7 +687,7 @@ namespace LgWebOs
             h.Invoke(this, e);
         }
 
-        private void OnStringEvent(StringEventHandler handler, StringEventArgs e)
+        private void OnStringEvent(EventHandler<LgStringEventArgs> handler, LgStringEventArgs e)
         {
             var h = handler;
 

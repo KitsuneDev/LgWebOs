@@ -30,7 +30,7 @@ propDefaultValue=10d;
 #END_PARAMETER_PROPERTIES
 
 #BEGIN_PARAMETER_PROPERTIES Port
-propDefaultValue=3000d;
+propDefaultValue=3001d;
 #END_PARAMETER_PROPERTIES
 
 integer newDirection;

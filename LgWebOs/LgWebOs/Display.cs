@@ -41,16 +41,16 @@ namespace LgWebOs
         #endregion
 
         #region Events
-        public event EventHandler<LgUShortEventArgs> PowerStateChanged;
-        public event EventHandler<LgUShortEventArgs> VolumeValueChanged;
-        public event EventHandler<LgUShortEventArgs> VolumeMuteStateChanged;
-        public event EventHandler<LgUShortEventArgs> CurrentInputValueChanged;
-        public event EventHandler<LgUShortEventArgs> InputCountChanged;
-        public event EventHandler<LgStringEventArgs> ExternalInputNamesChanged;
-        public event EventHandler<LgStringEventArgs> ExternalInputIconsChanged;
-        public event EventHandler<LgUShortEventArgs> AppCountChanged;
-        public event EventHandler<LgStringEventArgs> AppNamesChanged;
-        public event EventHandler<LgStringEventArgs> AppIconsChanged;
+        public event LgUShortEventHandler PowerStateChanged;
+        public event LgUShortEventHandler VolumeValueChanged;
+        public event LgUShortEventHandler VolumeMuteStateChanged;
+        public event LgUShortEventHandler CurrentInputValueChanged;
+        public event LgUShortEventHandler InputCountChanged;
+        public event LgStringEventHandler ExternalInputNamesChanged;
+        public event LgStringEventHandler ExternalInputIconsChanged;
+        public event LgUShortEventHandler AppCountChanged;
+        public event LgStringEventHandler AppNamesChanged;
+        public event LgStringEventHandler AppIconsChanged;
         #endregion
 
         #region Public Variables
@@ -152,7 +152,7 @@ namespace LgWebOs
                     }
                 }
 
-                _wsClient.IpAddress = "ws://" + ipAddress;
+                _wsClient.IpAddress = "wss://" + ipAddress;
                 _wsClient.Port = port;
 
                 _cmdQueueDequeuer.Reset(0, 250);
@@ -210,6 +210,7 @@ namespace LgWebOs
                             if (!IsRegistered)
                             {
                                 IsRegistered = true;
+                                CrestronConsole.PrintLine("TV Registered successfully!");
                                 DisplayGetInfo();
                                 ResetHeartbeat(60000);
                             }
@@ -223,7 +224,9 @@ namespace LgWebOs
                 {
                     if (response["type"].ToObject<string>() != "response") return;
                     if (response["id"] == null) return;
-                    switch (response["id"].ToObject<string>())
+                    var responseId = response["id"].ToObject<string>();
+                    CrestronConsole.PrintLine("Response ID: {0}", responseId);
+                    switch (responseId)
                     {
                         case "powerOff":
                             if (response["payload"] == null) return;
@@ -284,7 +287,7 @@ namespace LgWebOs
 
                                             count = Convert.ToUInt16(_externalInputs.Count);
                                         }
-
+                                        CrestronConsole.PrintLine("External Inputs: {0}", inputNames.Count);
                                         OnUShortEvent(InputCountChanged, new LgUShortEventArgs() {Payload = count});
 
 
@@ -327,7 +330,7 @@ namespace LgWebOs
                                             appIcons.Add(input.Icon.Replace("http:",
                                                 string.Format("http://{0}:{1}", _ipAddress, _port)));
                                         }
-
+                                        CrestronConsole.PrintLine("Apps: {0}", appNames.Count);
                                         OnUShortEvent(AppCountChanged, new LgUShortEventArgs() {Payload = Convert.ToUInt16(_apps.Count)});
 
 
@@ -372,17 +375,24 @@ namespace LgWebOs
                                         }
                                         break;
                                     case "getVolume":
-                                        if (!response["payload"]["returnValue"].ToObject<bool>()) return;
+                                        CrestronConsole.PrintLine("GetVolume Response: " + response.ToString());
+                                        if (!response["payload"]["returnValue"].ToObject<bool>())
+                                        {
+                                            CrestronConsole.PrintLine("GetVolume Failed");
+                                            return;
+                                        }
+                                        CrestronConsole.PrintLine("Decoding new Volume... T" + response["payload"]["volumeStatus"]["volume"].Type);
+                                        
                                         var value =
-                                            ScaleUp(Convert.ToInt16(response["payload"]["volume"].ToObject<string>()));
-
+                                            ScaleUp(Convert.ToInt16(response["payload"]["volumeStatus"]["volume"].ToObject<int>()));
+                                        CrestronConsole.PrintLine("Volume Changed: {0}", value);
                                         OnUShortEvent(VolumeValueChanged, new LgUShortEventArgs() {Payload = Convert.ToUInt16(value)});
 
-                                        if (response["payload"]["muted"].ToObject<bool>())
+                                        if (response["payload"]["volumeStatus"]["muteStatus"].ToObject<bool>())
                                         {
                                             OnUShortEvent(VolumeMuteStateChanged, new LgUShortEventArgs() {Payload = 1});
                                         }
-                                        else if (!response["payload"]["muted"].ToObject<bool>())
+                                        else if (!response["payload"]["volumeStatus"]["muteStatus"].ToObject<bool>())
                                         {
                                             OnUShortEvent(VolumeMuteStateChanged, new LgUShortEventArgs() {Payload = 0});
                                         }
@@ -406,6 +416,15 @@ namespace LgWebOs
             }
             catch (Exception ex)
             {
+                CrestronConsole.PrintLine("An error has been detected interpreting a response");
+                CrestronConsole.PrintLine("Response: {0}", args.Payload);
+                CrestronConsole.PrintLine("Exception in WebOsResponseHandler: {0}", ex.Message);
+                CrestronConsole.PrintLine(ex.StackTrace);
+                CrestronConsole.PrintLine("----------------------------------------");
+                CrestronConsole.PrintLine(ex.ToString());
+                CrestronConsole.PrintLine("----------------------------------------");
+                
+                
                 _logger.LogException(ex);
             }
         }
@@ -679,15 +698,19 @@ namespace LgWebOs
         }
         #endregion
 
-        private void OnUShortEvent(EventHandler<LgUShortEventArgs> handler, LgUShortEventArgs e)
+        private void OnUShortEvent(LgUShortEventHandler handler, LgUShortEventArgs e)
         {
             var h = handler;
 
-            if (h == null) return;
+            if (h == null)
+            {
+                CrestronConsole.PrintLine("Event handler is null!");
+                return;
+            };
             h.Invoke(this, e);
         }
 
-        private void OnStringEvent(EventHandler<LgStringEventArgs> handler, LgStringEventArgs e)
+        private void OnStringEvent(LgStringEventHandler handler, LgStringEventArgs e)
         {
             var h = handler;
 

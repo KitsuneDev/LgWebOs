@@ -1,5 +1,5 @@
 ﻿
 namespace LgWebOs.Events
 {
-    public delegate void UShortEventHandler(object sender, LgUShortEventArgs args);
+    public delegate void LgUShortEventHandler(object sender, LgUShortEventArgs args);
 }

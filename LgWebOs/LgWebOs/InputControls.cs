@@ -26,8 +26,9 @@ namespace LgWebOs
                 DebugLevel = logger.DebugLevel
             });
 
+            path = path.Replace("wss:", string.Empty);
             path = path.Replace("ws:", string.Empty);
-            _socketClient.Connect("ws://" + ipAddress + path, port);
+            _socketClient.Connect("wss://" + ipAddress + path, port);
         }
 
         internal void SendKey(string key)

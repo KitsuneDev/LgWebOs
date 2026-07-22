@@ -20,6 +20,8 @@ namespace LgWebOs
     public class Display : IDisposable
     {
         #region Private Variables
+        private const int ReconnectIntervalMs = 5000;
+        private const int ReconnectMaxAttempts = 12;
         private readonly WebSocketClient _wsClient;
         private readonly ILogger _logger;
         private readonly object _mainLock = new object();
@@ -29,6 +31,7 @@ namespace LgWebOs
         private readonly CTimer _cmdQueueDequeuer;
         private readonly CTimer _heartbeatTimer;
         private readonly CTimer _heartbeatFailedTimer;
+        private readonly CTimer _reconnectTimer;
         private readonly CommandQueue<Command> _cmdQueue = new CommandQueue<Command>();
 
         private ushort _port;
@@ -38,6 +41,8 @@ namespace LgWebOs
         private string _clientKey;
         private string _keyFilePath;
         private string _currentInput;
+        private bool _connectRequested;
+        private int _reconnectAttempts;
         #endregion
 
         #region Events
@@ -98,6 +103,8 @@ namespace LgWebOs
                     _heartbeatFailedTimer.Reset(2500);
                 }
             }, Timeout.Infinite);
+
+            _reconnectTimer = new CTimer(AttemptReconnect, Timeout.Infinite);
 
             _wsClient = new WebSocketClient(_logger);
 
@@ -161,7 +168,7 @@ namespace LgWebOs
 
                 OnUShortEvent(PowerStateChanged, new LgUShortEventArgs() {Payload = 0});
 
-                _wsClient.Connect();
+                RequestConnect(0);
             }
         }
 
@@ -172,6 +179,82 @@ namespace LgWebOs
                 _logger.PrintLine("Restarting heartbeat timer...");
                 _heartbeatFailedTimer.Stop();
                 _heartbeatTimer.Reset(dueTime);
+            }
+        }
+
+        private void StartReconnectLoop(long dueTime)
+        {
+            lock (_mainLock)
+            {
+                if (!_connectRequested)
+                    return;
+
+                _reconnectAttempts = 0;
+                _reconnectTimer.Reset(dueTime, ReconnectIntervalMs);
+            }
+        }
+
+        private void StopReconnectLoop()
+        {
+            lock (_mainLock)
+            {
+                _reconnectTimer.Stop();
+            }
+        }
+
+        private void RequestConnect(long dueTime)
+        {
+            lock (_mainLock)
+            {
+                _connectRequested = true;
+                _reconnectAttempts = 0;
+
+                _reconnectTimer.Reset(dueTime, ReconnectIntervalMs);
+            }
+        }
+
+        private void AttemptReconnect(object _)
+        {
+            bool doConnect = false;
+
+            lock (_mainLock)
+            {
+                if (Disposed)
+                    return;
+
+                if (!_connectRequested)
+                {
+                    _reconnectTimer.Stop();
+                    return;
+                }
+
+                if (_wsClient.IsConnected)
+                {
+                    _reconnectTimer.Stop();
+                    return;
+                }
+
+                if (_reconnectAttempts >= ReconnectMaxAttempts)
+                {
+                    _logger.LogWarning("Reconnect attempts exhausted ({0}).", ReconnectMaxAttempts);
+                    _reconnectTimer.Stop();
+                    return;
+                }
+
+                _reconnectAttempts++;
+                doConnect = true;
+            }
+
+            if (!doConnect)
+                return;
+
+            try
+            {
+                _wsClient.Connect();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogException(ex);
             }
         }
 
@@ -442,6 +525,9 @@ namespace LgWebOs
                         _logger.PrintLine("Received connected event!");
                         _logger.LogNotice("Received connected event!");
 
+                        StopReconnectLoop();
+                        _reconnectAttempts = 0;
+
                         if (!IsPoweredOn)
                         {
                             IsPoweredOn = true;
@@ -478,6 +564,8 @@ namespace LgWebOs
                             OnUShortEvent(PowerStateChanged, new LgUShortEventArgs() {Payload = 0});
                         }
 
+                        StartReconnectLoop(ReconnectIntervalMs);
+
                         _logger.PrintLine("Processed disconnected event!");
                         _logger.LogNotice("Processed disconnected event!");
                     }
@@ -498,6 +586,8 @@ namespace LgWebOs
                     _heartbeatTimer.Stop();
                     _heartbeatFailedTimer.Stop();
 
+                    StopReconnectLoop();
+
                     _wsClient.Disconnect();
 
                     using(var ev = new CEvent(false, false))
@@ -507,7 +597,10 @@ namespace LgWebOs
                         ev.Wait();
                     }
 
-                    _wsClient.Connect();
+                    if (_connectRequested)
+                    {
+                        RequestConnect(0);
+                    }
                 }
             });
         }
@@ -522,7 +615,7 @@ namespace LgWebOs
             _logger.PrintLine("Trying to send power on...");
             lock (_mainLock)
             {
-                if (IsPoweredOn)
+                if (IsPoweredOn && _wsClient.IsConnected)
                 {
                     _logger.PrintLine("Already powered on");
                     return;
@@ -531,6 +624,8 @@ namespace LgWebOs
                 WakeOnLanUtility.SendWol(_ipAddress, _macAddress, 1);
                 CrestronEnvironment.Sleep(10);
                 WakeOnLanUtility.SendWol(_ipAddress, _macAddress, 1);
+
+                RequestConnect(0);
             }
             _logger.PrintLine("Sent power on");
         }
@@ -540,6 +635,9 @@ namespace LgWebOs
             _logger.PrintLine("Trying to send power off...");
             lock (_mainLock)
             {
+                _connectRequested = false;
+                StopReconnectLoop();
+
                 if (!IsPoweredOn)
                 {
                     _logger.PrintLine("Already powered off");
@@ -735,6 +833,10 @@ namespace LgWebOs
                 _heartbeatFailedTimer.Stop();
                 _heartbeatTimer.Dispose();
                 _heartbeatFailedTimer.Dispose();
+
+                _connectRequested = false;
+                _reconnectTimer.Stop();
+                _reconnectTimer.Dispose();
 
                 _cmdQueueDequeuer.Stop();
                 _cmdQueueDequeuer.Dispose();
